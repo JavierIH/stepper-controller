@@ -8,10 +8,11 @@
 //Parameters
 int32_t motion_amp = 10000;         //amplitude of the motion in steps
 float ie_ratio = 0.5;               //ratio between inspiration and expiration
-int16_t n_cycles = 1;               //number of cycles before a delay
-int32_t delay_time = 20;            //delay between cycles, in ms
+int16_t n_cycles = 5;               //number of cycles before a delay
+int16_t current_cycle = 0;         //number of current cycles
+int32_t delay_time = 10;            //delay between cycles, in ms
 int32_t max_accel = 50000;          //maximum acceleration
-int32_t max_speed = 20000;          //maximum speed
+int32_t max_speed = 2000;          //maximum speed
 int32_t offset = 0;                 //offset position
 
 //Pinout
@@ -38,7 +39,9 @@ char text_buffer[6][17];
 int8_t cursor_pos = 7;
 int16_t encoder_inc = 1;
 int64_t last_screen_update = -200;
+uint64_t resume_time = 0;
 boolean menu_mode = true;
+boolean start_stop = false;
 
 
 void update_screen(){
@@ -100,6 +103,12 @@ void setup(){
     stepper.setAcceleration(max_accel);
 
     clean_screen_buffer();
+    sprintf(text_buffer[2], "  PRESS BUTTON  ");
+    sprintf(text_buffer[3], "    TO START    ");
+    update_screen();
+    while(encoder.getButton() != ClickEncoder::Clicked);
+
+    clean_screen_buffer();
     sprintf(text_buffer[2], "   HOMING  IN   ");
     sprintf(text_buffer[3], "    PROGRESS    ");
     update_screen();
@@ -113,18 +122,18 @@ void setup(){
     update_screen();
     calibrate_position();
 
-    clean_screen_buffer();
+    /*clean_screen_buffer();
     sprintf(text_buffer[2], "  STARTING IN   ");
     sprintf(text_buffer[3], "   5 SECONDS    ");
     update_screen();
-    delay(5000);
+    delay(5000);*/
 
     sprintf(text_buffer[0], " AMP: %d", motion_amp);
     sprintf(text_buffer[1], " IE_RATIO: %d.%d", (int)ie_ratio, (int)(ie_ratio*10)%10);
     sprintf(text_buffer[2], " SPEED: %d", max_speed);
     sprintf(text_buffer[3], " CYCLES: %d", n_cycles);
     sprintf(text_buffer[4], " DELAY: %d", delay_time);
-    sprintf(text_buffer[5], " START/STOP: ");
+    sprintf(text_buffer[5], " START          ");
     cursor_pos = 0;
     update_screen();
 
@@ -167,12 +176,17 @@ void loop(){
                 sprintf(text_buffer[3], " CYCLES: %d", n_cycles);
                 break;
             case 4:
-                delay_time += encoder_inc*10;
+                delay_time += encoder_inc;
                 if(delay_time < 0) delay_time = 0;
                 sprintf(text_buffer[4], " DELAY: %d", delay_time);
                 break;
             case 5:
-                sprintf(text_buffer[5], " START/STOP: ");
+                start_stop = !start_stop;
+                menu_mode = !menu_mode;
+                if(start_stop) sprintf(text_buffer[5], " STOP           ");
+                else sprintf(text_buffer[5], " RESUME         ");
+                current_cycle = 0;
+                update_screen();
                 break;
             default:
                 break;
@@ -187,17 +201,24 @@ void loop(){
             update_screen();
         }
     }
-    if (!stepper.isRunning()){
-        if(stepper.currentPosition()==0){
-            stepper.setMaxSpeed(max_speed);
-            stepper.moveTo(motion_amp);
+    if (!stepper.isRunning() && resume_time < millis()){ // TODO remember to check the overflow of millis
+        if(stepper.currentPosition() == 0){
+            if(current_cycle >= n_cycles){
+                resume_time = millis() + delay_time*1000;
+                current_cycle = 0;
+            }
+            else{
+                stepper.setMaxSpeed(max_speed);
+                stepper.moveTo(motion_amp);
+            }
         }
         else{
             stepper.setMaxSpeed(max_speed*ie_ratio);
             stepper.moveTo(0);
+            current_cycle++;
         }
     }
-    stepper.run();
+    if(start_stop) stepper.run();
 }
 
 void timerIsr() {
